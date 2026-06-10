@@ -339,20 +339,44 @@ function saveSetup() {
   loadAll();
 }
 
-// ── API via fetch ─────────────────────────────────────────────
+// ── API via JSONP (cross-origin safe) ────────────────────────
+var _jsonpCallbacks = {};
+var _jsonpCounter = 0;
+
 function api(action, data, callback) {
+  var cbName = '_jsonp_' + (++_jsonpCounter);
   var url = new URL(SCRIPT_URL);
   url.searchParams.set('action', action);
   if (data) url.searchParams.set('payload', JSON.stringify(data));
+  url.searchParams.set('callback', cbName);
   url.searchParams.set('_t', Date.now());
 
-  fetch(url.toString(), { redirect: 'follow' })
-    .then(function(resp) { return resp.json(); })
-    .then(function(result) {
-      if (result.error) { callback(result.error); return; }
-      callback(null, result);
-    })
-    .catch(function(err) { callback(err.message || String(err)); });
+  var timeout = setTimeout(function() {
+    delete window[cbName];
+    var s = document.getElementById(cbName);
+    if (s) s.remove();
+    callback('Request timed out. Check your Apps Script URL and deployment.');
+  }, 15000);
+
+  window[cbName] = function(result) {
+    clearTimeout(timeout);
+    delete window[cbName];
+    var s = document.getElementById(cbName);
+    if (s) s.remove();
+    if (result.error) { callback(result.error); return; }
+    callback(null, result);
+  };
+
+  var script = document.createElement('script');
+  script.id = cbName;
+  script.src = url.toString();
+  script.onerror = function() {
+    clearTimeout(timeout);
+    delete window[cbName];
+    script.remove();
+    callback('Could not reach Apps Script. Check your URL.');
+  };
+  document.head.appendChild(script);
 }
 
 // ── Load ──────────────────────────────────────────────────────
